@@ -396,6 +396,7 @@
     import {KsMessage, KsDrawer, KsMarkdown, KsTag, KsDropdown, KsDropdownMenu, KsDropdownItem, deepMerge} from "@kestra-io/design-system"
     import {routeQueryToQueryFilters} from "../../../utils/queryFilters"
     import {useToast} from "../../../utils/toast"
+    import type {ExecutionLabelInput} from "../../../utils/executionLabels"
     import {useFlowStore} from "../../../stores/flow"
     import {useAuthStore} from "override/stores/auth"
     import BreakableText from "../../BreakableText"
@@ -482,7 +483,7 @@
         start: Date | null;
         end: Date | null;
         inputs: Record<string, unknown> | null;
-        labels: Label[];
+        labels: ExecutionLabelInput[];
     }>({
         start: null,
         end: null,
@@ -696,10 +697,12 @@
 
     type BackfillRequest = TriggerControllerApiCreateBackfillRequest["backfill"]
 
-    const cleanBackfill = computed<BackfillRequest>(() => {
-        const labels = backfill.value.labels.filter(label => label.key && label.value)
+    const cleanBackfill = computed<BackfillRequest | undefined>(() => {
+        const {start} = backfill.value
+        if (!start) return undefined
+        const labels = backfill.value.labels.filter((label): label is Label => Boolean(label.key && label.value))
         return {
-            start: backfill.value.start?.toISOString(),
+            start: start.toISOString(),
             end: backfill.value.end?.toISOString(),
             // the spec models the endpoint's Map<String, Object> inputs as a map of maps
             inputs: (backfill.value.inputs ?? undefined) as BackfillRequest["inputs"],
@@ -709,13 +712,14 @@
 
     const postBackfill = () => {
         const trigger = selectedTrigger.value
-        if (!trigger) return
+        const request = cleanBackfill.value
+        if (!trigger || !request) return
 
         TriggersAPI.createBackfill({
             namespace: trigger.namespace,
             flowId: trigger.flowId,
             triggerId: trigger.triggerId,
-            backfill: cleanBackfill.value,
+            backfill: request,
         })
             .then(() => {
                 toast.saved(trigger.triggerId)
