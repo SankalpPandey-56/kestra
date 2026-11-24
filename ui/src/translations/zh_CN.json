@@ -1245,6 +1245,7 @@
     "collapse all": "折叠所有",
     "expand": "展开",
     "collapse": "折叠",
+    "checks_failing": "{count} 个检查失败 | {count} 个检查失败",
     "filter_for": "筛选",
     "filter_out": "筛选",
     "copy_value": "复制值",
