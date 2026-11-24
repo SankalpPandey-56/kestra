@@ -4,6 +4,7 @@ import {type VueWrapper} from "@vue/test-utils"
 import KestraDesignSystem from "@kestra-io/design-system"
 
 const publishDraft = vi.fn().mockResolvedValue("saved")
+const saveAsDraft = vi.fn()
 
 const routeState = {tab: "edit"}
 const flowState = {deleted: false, exists: true, isCreating: false}
@@ -62,7 +63,7 @@ vi.mock("../../../components/flows/useFlowEditorActions", () => ({
         isPlaygroundEnabled: false,
         isPlaygroundAllowed: false,
         save: vi.fn(),
-        saveAsDraft: vi.fn(),
+        saveAsDraft,
         publishDraft,
         saveAndExecute: vi.fn(),
         exportYaml: vi.fn(),
@@ -72,7 +73,13 @@ vi.mock("../../../components/flows/useFlowEditorActions", () => ({
     }),
 }))
 
+// The retry loop and the restore prompt have their own spec; here only the buttons are under test.
+vi.mock("../../../components/flows/useDraftOutbox", () => ({
+    useDraftOutbox: vi.fn(),
+}))
+
 import Actions from "./Actions.vue"
+import {markServerReachable, markServerUnreachable, UNREACHABLE_DELAY} from "../../../composables/useServerReachability"
 import {i18nMount} from "../../../../tests/unit/i18nMount"
 
 const messages = {
@@ -139,6 +146,26 @@ describe("Actions.vue — publish a draft flow", () => {
         await publishButton!.trigger("click")
 
         expect(publishDraft).toHaveBeenCalledTimes(1)
+    })
+
+    it("turns the main button into Save as draft and disables Execute while the server is unreachable", async () => {
+        vi.useFakeTimers()
+        try {
+            markServerUnreachable()
+            vi.advanceTimersByTime(UNREACHABLE_DELAY)
+
+            const wrapper = mountActions()
+
+            expect(findButtonByText(wrapper, "Publish")).toBeUndefined()
+            await findButtonByText(wrapper, "Save as draft")!.trigger("click")
+
+            expect(saveAsDraft).toHaveBeenCalledOnce()
+            expect(publishDraft).not.toHaveBeenCalled()
+            expect(findExecute(wrapper).attributes("disabled")).toBe("true")
+        } finally {
+            markServerReachable()
+            vi.useRealTimers()
+        }
     })
 })
 

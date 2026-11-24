@@ -3,7 +3,7 @@ import {useRoute, useRouter} from "vue-router"
 import {useI18n} from "vue-i18n"
 
 import * as localUtils from "../../utils/utils"
-import {isSuccessfulFlowSaveOutcome, useFlowStore} from "../../stores/flow"
+import {isSuccessfulFlowSaveOutcome, useFlowStore, type FlowSaveOutcome} from "../../stores/flow"
 import {useExecutionsStore} from "../../stores/executions"
 import {useProductTourStore} from "../../stores/productTour"
 import {usePlaygroundStore} from "../../stores/playground"
@@ -13,10 +13,13 @@ import {useCoreStore} from "../../stores/core"
 import {useToast} from "../../utils/toast"
 import {KsNotification} from "@kestra-io/design-system"
 import {asProblem} from "@kestra-io/kestra-sdk"
-import {isReportedCentrally, type KestraHttpError} from "../../utils/kestraHttp"
+import {isReportedCentrally, isServerUnreachableError, type KestraHttpError} from "../../utils/kestraHttp"
 import PluginInstallToast from "../plugins/PluginInstallToast.vue"
 
 import {storageKeys} from "../../utils/constants"
+
+export type DraftSyncOutcome = "synced" | "retry" | "stop"
+
 export function useFlowEditorActions() {
     const flowStore = useFlowStore()
     const executionsStore = useExecutionsStore()
@@ -44,7 +47,7 @@ export function useFlowEditorActions() {
         }
     }
 
-    async function persistAll(draft?: boolean) {
+    async function persistAll(draft?: boolean): Promise<FlowSaveOutcome> {
         const isCreating = flowStore.isCreating
         const outcome = await flowStore.saveAll(draft)
 
@@ -64,6 +67,7 @@ export function useFlowEditorActions() {
         }
 
         await flushDirtyFiles()
+        return outcome
     }
 
     // Upper bound on how long a save waits on a plugin install job before giving up.
@@ -176,6 +180,23 @@ export function useFlowEditorActions() {
         }
     }
 
+    function queueDraftIfUnreachable(error: unknown): boolean {
+        if (!isServerUnreachableError(error) || !flowStore.queueDraft()) return false
+        toast.warning(t("offlineDraft.queued"), t("offlineDraft.queued title"))
+        return true
+    }
+
+    /** Retries the queued draft through the regular save, so the outdated-revision prompt and the creation redirect still apply. */
+    async function syncQueuedDraft(): Promise<DraftSyncOutcome> {
+        try {
+            return isSuccessfulFlowSaveOutcome(await persistAll(true)) ? "synced" : "stop"
+        } catch (error) {
+            if (isServerUnreachableError(error)) return "retry"
+            reportSaveError(error)
+            return "stop"
+        }
+    }
+
     /** The Save button: publishes, so on a draft, where it sits in the menu behind Publish, it is an explicit way out of draft mode. */
     async function save() {
         await saveFlow(false)
@@ -194,6 +215,8 @@ export function useFlowEditorActions() {
             if (outcome === "failed" || outcome === "timeout") return
             await persistAll(draft)
         } catch (error) {
+            // Only a save that would have stayed a draft is queued: publishing has side effects the server must accept first.
+            if ((draft ?? flowStore.flow?.draft) && queueDraftIfUnreachable(error)) return
             reportSaveError(error)
         }
     }
@@ -202,6 +225,7 @@ export function useFlowEditorActions() {
         try {
             await persistAll(true)
         } catch (error) {
+            if (queueDraftIfUnreachable(error)) return
             reportSaveError(error)
         }
     }
@@ -344,6 +368,7 @@ export function useFlowEditorActions() {
         save,
         saveKeepingDraftState,
         saveAsDraft,
+        syncQueuedDraft,
         publishDraft,
         saveAndExecute,
         exportYaml,

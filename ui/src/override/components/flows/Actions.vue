@@ -40,10 +40,10 @@
                 :buttonProps="{disabled: editorHasErrors}"
                 @click="editorSaveOrPublish"
             >
-                {{ isPublishAction ? $t('publish') : $t('save') }}
+                {{ primarySaveLabel }}
                 <template #dropdown>
                     <KsDropdownMenu>
-                        <KsDropdownItem v-if="isPublishAction" :icon="ContentSave" @click="editorSave">
+                        <KsDropdownItem v-if="isPublishAction" :icon="ContentSave" :disabled="unreachable" @click="editorSave">
                             {{ $t('save') }}
                         </KsDropdownItem>
                         <KsDropdownItem :icon="FileDocumentEditOutline" @click="editorSaveAsDraft">
@@ -52,7 +52,7 @@
                         <KsDropdownItem
                             v-if="editorHaveChange && !flowStore.isCreating"
                             :icon="PlayBoxOutline"
-                            :disabled="editorHasErrors || editorIsReadOnly"
+                            :disabled="editorHasErrors || editorIsReadOnly || unreachable"
                             @click="editorSaveAndExecute"
                         >
                             {{ $t('save_and_execute') }}
@@ -80,6 +80,7 @@
                 v-else-if="shouldShowExecute"
                 type="primary"
                 compact
+                :disabled="unreachable"
                 :flowId="flow?.id"
                 :namespace="flow?.namespace"
                 :flowSource="flow?.source"
@@ -119,6 +120,8 @@
     import {useLogsStore} from "../../../stores/logs"
     import {useToast} from "../../../utils/toast"
     import {useFlowEditorActions} from "../../../components/flows/useFlowEditorActions"
+    import {useDraftOutbox} from "../../../components/flows/useDraftOutbox"
+    import {useServerReachability} from "../../../composables/useServerReachability"
 
     const {t} = useI18n({useScope: "global"})
 
@@ -137,6 +140,9 @@
     const isEditTab = computed(() => tab.value === "edit" || flowStore.isCreating)
 
     const authStore = useAuthStore()
+
+    const {unreachable} = useServerReachability()
+    useDraftOutbox(isEditTab)
 
     const {
         haveChange: editorHaveChange,
@@ -176,7 +182,17 @@
     // reachable in the dropdown.
     const isPublishAction = computed(() => editorIsDraft.value && !flowStore.isCreating)
 
+    // A draft is the only save that can wait for the server, so it takes the main button while there is none.
+    const primarySaveLabel = computed(() => {
+        if (unreachable.value) return t("save_as_draft")
+        return isPublishAction.value ? t("publish") : t("save")
+    })
+
     const editorSaveOrPublish = () => {
+        if (unreachable.value) {
+            editorSaveAsDraft()
+            return
+        }
         if (isPublishAction.value) {
             editorPublishDraft()
             return
